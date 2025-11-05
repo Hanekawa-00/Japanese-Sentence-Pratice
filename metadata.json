@@ -1,0 +1,5 @@
+{
+  "name": "Japanese Sentence Practice",
+  "description": "An AI-powered web application for Japanese language learners to practice translating Chinese sentences into Japanese. The app provides a sentence, the user provides a translation, and the AI provides corrections and feedback on naturalness and grammar.",
+  "requestFramePermissions": []
+}
