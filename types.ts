@@ -1,6 +1,7 @@
 export enum GameState {
   Welcome,
   Practicing,
+  SentenceCheck,
   Loading,
   Feedback,
   Grammar,
@@ -10,6 +11,7 @@ export enum GameState {
 export enum GameMode {
   Translation = 'TRANSLATION',
   MultipleChoice = 'MULTIPLE_CHOICE',
+  SentenceCheck = 'SENTENCE_CHECK',
 }
 
 export enum Difficulty {
@@ -87,4 +89,16 @@ export type MultipleChoiceHistoryItem = {
   audiosBase64?: (string | null)[];
 };
 
-export type HistoryItem = TranslationHistoryItem | MultipleChoiceHistoryItem;
+export type SentenceCheckHistoryItem = {
+  id: string;
+  timestamp: number;
+  gameMode: GameMode.SentenceCheck;
+  userSentence: string;
+  correctedSentence: string;
+  score: number;
+  evaluation: string;
+  feedbackExplanation: string;
+  audioBase64?: string;
+};
+
+export type HistoryItem = TranslationHistoryItem | MultipleChoiceHistoryItem | SentenceCheckHistoryItem;

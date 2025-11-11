@@ -3,14 +3,15 @@ import { SentenceTask, Feedback } from '../types';
 import { CheckCircleIcon } from './icons/CheckCircleIcon';
 import { LightBulbIcon } from './icons/LightBulbIcon';
 import MarkdownRenderer from './MarkdownRenderer';
-import { evaluateSentenceStream, generateSpeech, decode, decodeAudioData } from '../services/geminiService';
+import { evaluateSentenceStream, evaluateJapaneseSentenceStream, generateSpeech, decode, decodeAudioData } from '../services/geminiService';
 import { SpeakerWaveIcon } from './icons/SpeakerWaveIcon';
 
 interface FeedbackDisplayProps {
-  task: SentenceTask;
+  task?: SentenceTask;
   userSentence: string;
   onNext: () => void;
   onComplete: (feedback: Feedback, audioBase64: string | null) => void;
+  onNextLabel?: string;
 }
 
 const getScoreColors = (score: number) => {
@@ -20,7 +21,7 @@ const getScoreColors = (score: number) => {
 };
 
 
-const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ task, userSentence, onNext, onComplete }) => {
+const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ task, userSentence, onNext, onComplete, onNextLabel }) => {
   const [feedback, setFeedback] = useState<Partial<Feedback>>({ explanation: '', score: undefined, evaluation: '' });
   const [isStreaming, setIsStreaming] = useState(true);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
@@ -42,7 +43,7 @@ const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ task, userSentence, o
   }, []);
 
   useEffect(() => {
-    if (!task) return;
+    if (!userSentence && !task) return;
 
     feedbackRef.current = { explanation: '', score: undefined, evaluation: '' }; // Reset ref
 
@@ -51,40 +52,61 @@ const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ task, userSentence, o
       setFeedback({ explanation: '', score: undefined, evaluation: '' }); 
       setCachedAudio(null);
 
-      try {
-        await evaluateSentenceStream(
-          task,
-          userSentence,
-          (structuredData) => {
-            setFeedback(prev => ({ ...prev, ...structuredData }));
-            Object.assign(feedbackRef.current, structuredData);
-          },
-          (explanationChunk) => {
-            setFeedback(prev => ({
-              ...prev,
-              explanation: (prev.explanation || '') + explanationChunk
-            }));
-            feedbackRef.current.explanation = (feedbackRef.current.explanation || '') + explanationChunk;
-          },
-          async () => {
-            setIsStreaming(false);
+       const handleStreamEnd = async () => {
+        setIsStreaming(false);
 
-            let audio: string | null = null;
-            if (feedbackRef.current.correctedSentence) {
-                setIsAudioLoading(true);
-                audio = await generateSpeech(feedbackRef.current.correctedSentence);
-                setCachedAudio(audio);
-                setIsAudioLoading(false);
+        let audio: string | null = null;
+        if (feedbackRef.current.correctedSentence) {
+            setIsAudioLoading(true);
+            try {
+              audio = await generateSpeech(feedbackRef.current.correctedSentence);
+            } catch (e) {
+              console.error("Audio generation failed:", e);
+              audio = null;
             }
+            setCachedAudio(audio);
+            setIsAudioLoading(false);
+        }
 
-            onComplete({
-                score: feedbackRef.current.score ?? 0,
-                evaluation: feedbackRef.current.evaluation ?? '评价未提供',
-                correctedSentence: feedbackRef.current.correctedSentence ?? '(AI did not provide a correction.)',
-                explanation: feedbackRef.current.explanation ?? ''
-            }, audio);
-          }
-        );
+        onComplete({
+            score: feedbackRef.current.score ?? 0,
+            evaluation: feedbackRef.current.evaluation ?? '评价未提供',
+            correctedSentence: feedbackRef.current.correctedSentence ?? '(AI did not provide a correction.)',
+            explanation: feedbackRef.current.explanation ?? ''
+        }, audio);
+      };
+
+      const handleStructuredData = (structuredData: { score: number; evaluation: string; correctedSentence: string; }) => {
+        setFeedback(prev => ({ ...prev, ...structuredData }));
+        Object.assign(feedbackRef.current, structuredData);
+      };
+      
+      const handleExplanationChunk = (explanationChunk: string) => {
+        setFeedback(prev => ({
+          ...prev,
+          explanation: (prev.explanation || '') + explanationChunk
+        }));
+        feedbackRef.current.explanation = (feedbackRef.current.explanation || '') + explanationChunk;
+      };
+
+
+      try {
+        if (task) {
+           await evaluateSentenceStream(
+            task,
+            userSentence,
+            handleStructuredData,
+            handleExplanationChunk,
+            handleStreamEnd
+          );
+        } else {
+           await evaluateJapaneseSentenceStream(
+            userSentence,
+            handleStructuredData,
+            handleExplanationChunk,
+            handleStreamEnd
+          );
+        }
       } catch (error) {
         console.error("Failed to stream feedback:", error);
         setFeedback(prev => ({
@@ -143,13 +165,16 @@ const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ task, userSentence, o
             )}
         </div>
       
-      <div>
-        <h3 className="text-lg font-semibold text-slate-300 mb-2">元の文 (中国語):</h3>
-        <p className="p-3 bg-slate-900/50 rounded-lg text-slate-200">{task.chineseSentence}</p>
-      </div>
+      {task && (
+        <div>
+          <h3 className="text-lg font-semibold text-slate-300 mb-2">元の文 (中国語):</h3>
+          <p className="p-3 bg-slate-900/50 rounded-lg text-slate-200">{task.chineseSentence}</p>
+        </div>
+      )}
+
 
       <div>
-        <h3 className="text-lg font-semibold text-slate-300 mb-2">あなたの翻訳:</h3>
+        <h3 className="text-lg font-semibold text-slate-300 mb-2">{task ? 'あなたの翻訳:' : 'Your Sentence:'}</h3>
         <p className="p-3 bg-slate-900/50 rounded-lg text-slate-200">{userSentence || '(未回答)'}</p>
       </div>
 
@@ -197,7 +222,7 @@ const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ task, userSentence, o
         disabled={isStreaming}
         className="w-full mt-4 px-8 py-3 bg-gradient-to-r from-blue-500 to-teal-400 text-white font-bold rounded-full hover:scale-105 transform transition-transform duration-300 focus:outline-none focus:ring-4 focus:ring-teal-300/50 shadow-lg disabled:bg-gray-600 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed disabled:scale-100"
       >
-        次の文章 (Next Sentence)
+        {onNextLabel || '次の文章 (Next Sentence)'}
       </button>
     </div>
   );

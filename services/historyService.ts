@@ -1,4 +1,4 @@
-import { HistoryItem } from '../types';
+import { HistoryItem, GameMode } from '../types';
 
 const HISTORY_KEY = 'japanesePracticeHistory';
 
@@ -71,12 +71,22 @@ export const mergeAndSaveHistory = (importedHistory: HistoryItem[]): HistoryItem
     const historyMap = new Map<string, HistoryItem>();
 
     for (const item of combinedHistory) {
+      // FIX: The original code incorrectly accessed `chineseSentence` on all `HistoryItem` types.
+      // This fix uses the `gameMode` discriminant property to safely access the correct sentence property
+      // for validation and creating a deduplication key.
+      let mainSentence;
+      if (item.gameMode === GameMode.SentenceCheck) {
+        mainSentence = item.userSentence;
+      } else {
+        mainSentence = item.chineseSentence;
+      }
+
       // Basic validation for each item
-      if (typeof item.id !== 'string' || typeof item.timestamp !== 'number' || typeof item.chineseSentence !== 'string') {
+      if (typeof item.id !== 'string' || typeof item.timestamp !== 'number' || typeof mainSentence !== 'string') {
           console.warn('Skipping invalid item during merge:', item);
           continue;
       }
-      const key = `${item.timestamp}-${item.chineseSentence}`;
+      const key = `${item.timestamp}-${mainSentence}`;
       // If key doesn't exist, add it. This ensures existing data is kept over imported data in case of a duplicate.
       if (!historyMap.has(key)) {
         historyMap.set(key, item);

@@ -39,19 +39,24 @@ export async function decodeAudioData(
 
 // Speech Generation Service
 export const generateSpeech = async (text: string): Promise<string | null> => {
-    const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Say it clearly: ${text}` }] }],
-        config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-                voiceConfig: {
-                    prebuiltVoiceConfig: { voiceName: 'Leda' },
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash-preview-tts",
+            contents: [{ parts: [{ text: `Say it clearly: ${text}` }] }],
+            config: {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: {
+                    voiceConfig: {
+                        prebuiltVoiceConfig: { voiceName: 'Leda' },
+                    },
                 },
             },
-        },
-    });
-    return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data ?? null;
+        });
+        return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data ?? null;
+    } catch (error) {
+        console.error("Speech generation failed:", error);
+        return null;
+    }
 };
 
 
@@ -344,6 +349,120 @@ Your response MUST follow this structure exactly. Do not add any other text or f
 3.  The next line MUST be \`correctedSentence:\` followed by the corrected or most natural Japanese sentence.
 4.  The fourth line MUST be \`--- \`.
 5.  Everything after the \`--- \` is the detailed explanation in Chinese Markdown. If the student provided no answer, your explanation should simply state that and provide a brief breakdown of the correct answer.
+
+Example:
+score: 85
+evaluation: 很好！
+correctedSentence: 私の猫はとても可愛いです。
+--- 
+- **语法:** 你的句子在语法上是正确的，但是...
+`;
+
+    try {
+        const stream = await ai.models.generateContentStream({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        let buffer = '';
+        let headersParsed = false;
+
+        for await (const chunk of stream) {
+            const text = chunk.text;
+            if (text) {
+                if (headersParsed) {
+                    onExplanationChunk(text);
+                    continue;
+                }
+                
+                buffer += text;
+                const separator = '\n--- \n';
+                const separatorIndex = buffer.indexOf(separator);
+
+                if (separatorIndex !== -1) {
+                    headersParsed = true;
+                    const header = buffer.substring(0, separatorIndex);
+                    
+                    const scoreMatch = header.match(/^score:\s*(\d+)/m);
+                    const evaluationMatch = header.match(/^evaluation:\s*(.*)/m);
+                    const correctedSentenceMatch = header.match(/^correctedSentence:\s*(.*)/m);
+
+                    const score = scoreMatch ? parseInt(scoreMatch[1], 10) : 0;
+                    const evaluation = evaluationMatch ? evaluationMatch[1].trim() : '评价未提供';
+                    const correctedSentence = correctedSentenceMatch ? correctedSentenceMatch[1].trim() : '(AI did not provide a correction.)';
+                    
+                    onStructuredData({ score, evaluation, correctedSentence });
+
+                    const firstChunk = buffer.substring(separatorIndex + separator.length);
+                    if (firstChunk) {
+                        onExplanationChunk(firstChunk);
+                    }
+                }
+            }
+        }
+        
+        // Fallback for when the stream ends but the separator was never found
+        if (!headersParsed && buffer.length > 0) {
+            const headerPart = buffer;
+            const separator = '\n--- \n';
+            const separatorIndex = headerPart.indexOf(separator);
+            
+            const headers = separatorIndex !== -1 ? headerPart.substring(0, separatorIndex) : headerPart;
+
+            const scoreMatch = headers.match(/^score:\s*(\d+)/m);
+            const evaluationMatch = headers.match(/^evaluation:\s*(.*)/m);
+            const correctedSentenceMatch = headers.match(/^correctedSentence:\s*(.*)/m);
+
+            const score = scoreMatch ? parseInt(scoreMatch[1], 10) : 0;
+            const evaluation = evaluationMatch ? evaluationMatch[1].trim() : '评价未提供';
+            const correctedSentence = correctedSentenceMatch ? correctedSentenceMatch[1].trim() : '(AI did not provide a correction.)';
+            
+            onStructuredData({ score, evaluation, correctedSentence });
+            
+            let explanation = '';
+            if (separatorIndex !== -1) {
+                explanation = headerPart.substring(separatorIndex + separator.length);
+            } else {
+                 // No separator, guess explanation starts after correctedSentence
+                const lines = headers.split('\n');
+                const correctedLineIndex = lines.findIndex(line => line.startsWith('correctedSentence:'));
+                if (correctedLineIndex !== -1 && correctedLineIndex + 1 < lines.length) {
+                    explanation = lines.slice(correctedLineIndex + 1).join('\n').trim();
+                }
+            }
+
+            if (explanation) {
+                onExplanationChunk(explanation);
+            }
+        }
+
+    } catch (error) {
+        console.error("Error during stream evaluation:", error);
+        onExplanationChunk("\n\n**Error:** Failed to get feedback from the AI. Please try again.");
+    } finally {
+        await onStreamEnd();
+    }
+};
+
+export const evaluateJapaneseSentenceStream = async (
+  userSentence: string,
+  onStructuredData: (data: { score: number; evaluation: string; correctedSentence: string }) => void,
+  onExplanationChunk: (chunk: string) => void,
+  onStreamEnd: () => Promise<void>,
+): Promise<void> => {
+    const prompt = `You are a helpful and patient Japanese language teacher. Your core task is to evaluate a student's Japanese sentence based on the provided "Japanese Expression Specification Outline". Your feedback must be precise, constructive, and educational.
+
+The student's Japanese sentence is: "${userSentence || '(No answer provided)'}".
+
+${fullOutline}
+
+**Response Format:**
+Your response MUST follow this structure exactly. Do not add any other text or formatting.
+1.  Start with a line containing \`score:\` followed by a number from 0 to 100.
+2.  The next line MUST be \`evaluation:\` followed by a short, one-to-three-word evaluation in Chinese (e.g., 完美！, 很好, 有点可惜, 再加油).
+3.  The next line MUST be \`correctedSentence:\` followed by the corrected or most natural Japanese sentence. If the original is perfect, repeat it.
+4.  The fourth line MUST be \`--- \`.
+5.  Everything after the \`--- \` is the detailed explanation in Chinese Markdown. If the student provided no answer, your explanation should simply state that and provide a brief breakdown of a good example.
 
 Example:
 score: 85

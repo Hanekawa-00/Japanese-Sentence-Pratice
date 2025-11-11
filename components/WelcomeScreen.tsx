@@ -5,18 +5,20 @@ import { QuestionMarkCircleIcon } from './icons/QuestionMarkCircleIcon';
 import { Difficulty, GameMode, SentenceLength } from '../types';
 import { LibraryIcon } from './icons/LibraryIcon';
 import { ClockIcon } from './icons/ClockIcon';
+import { DocumentCheckIcon } from './icons/DocumentCheckIcon';
 
 interface WelcomeScreenProps {
   onStart: (difficulty: Difficulty, length: SentenceLength, mode: GameMode) => void;
   onViewGrammar: () => void;
   onViewHistory: () => void;
+  onStartSentenceCheck: () => void;
 }
 
 const difficultyLevels = [Difficulty.N5, Difficulty.N4, Difficulty.N3, Difficulty.N2, Difficulty.N1];
 const sentenceLengths = [SentenceLength.Short, SentenceLength.Medium, SentenceLength.Long];
 
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onViewGrammar, onViewHistory }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onViewGrammar, onViewHistory, onStartSentenceCheck }) => {
   const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty | null>(null);
   const [selectedLength, setSelectedLength] = useState<SentenceLength | null>(null);
 
@@ -88,7 +90,17 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onViewGrammar, o
         </div>
       </div>
 
-       <div className="mt-6 border-t border-slate-700 pt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+       <div className="mt-6 border-t border-slate-700 pt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <button
+            onClick={onStartSentenceCheck}
+            className="group w-full flex items-center justify-center gap-3 p-4 bg-slate-700/50 border-2 border-slate-600 rounded-lg text-slate-300 hover:bg-slate-600/50 hover:border-green-500 transition-all duration-200"
+        >
+            <DocumentCheckIcon className="w-8 h-8 text-green-400 group-hover:text-green-300 transition-colors"/>
+            <div>
+                <span className="font-semibold text-lg">文章チェック</span>
+                <p className="text-sm text-slate-400">Sentence Check</p>
+            </div>
+        </button>
         <button
             onClick={onViewGrammar}
             className="group w-full flex items-center justify-center gap-3 p-4 bg-slate-700/50 border-2 border-slate-600 rounded-lg text-slate-300 hover:bg-slate-600/50 hover:border-purple-500 transition-all duration-200"

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { GameState, SentenceTask, Feedback, Difficulty, GameMode, MultipleChoiceTask, SentenceLength, GrammarPoint, HistoryItem, TranslationHistoryItem, MultipleChoiceHistoryItem } from './types';
+import { GameState, SentenceTask, Feedback, Difficulty, GameMode, MultipleChoiceTask, SentenceLength, GrammarPoint, HistoryItem, TranslationHistoryItem, MultipleChoiceHistoryItem, SentenceCheckHistoryItem } from './types';
 import { generateSentenceTask, generateMultipleChoiceTask, getGrammarPoints } from './services/geminiService';
 import { getHistory, addHistoryItem, updateHistoryItem, mergeAndSaveHistory, deleteHistoryItem, deleteMultipleHistoryItems } from './services/historyService';
 import WelcomeScreen from './components/WelcomeScreen';
@@ -10,6 +10,7 @@ import MultipleChoiceScreen from './components/MultipleChoiceScreen';
 import { HomeIcon } from './components/icons/HomeIcon';
 import GrammarLibrary from './components/GrammarLibrary';
 import HistoryScreen from './components/HistoryScreen';
+import SentenceCheckScreen from './components/SentenceCheckScreen';
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.Welcome);
@@ -23,6 +24,9 @@ const App: React.FC = () => {
 
   // Multiple choice mode states
   const [mcqTask, setMcqTask] = useState<MultipleChoiceTask | null>(null);
+
+  // Sentence check mode state
+  const [sentenceToCheck, setSentenceToCheck] = useState('');
   
   // Grammar library state
   const [grammarPoints, setGrammarPoints] = useState<GrammarPoint[]>([]);
@@ -178,6 +182,34 @@ const App: React.FC = () => {
     addHistoryItem(newHistoryItem);
     setHistory(prevHistory => [newHistoryItem, ...prevHistory]);
   }, [mcqTask, difficulty, sentenceLength]);
+  
+  const handleStartSentenceCheck = () => {
+    setGameMode(GameMode.SentenceCheck);
+    setGameState(GameState.SentenceCheck);
+    setSentenceToCheck('');
+    setError(null);
+  };
+  
+  const handleSentenceCheckSubmit = (sentence: string) => {
+    setSentenceToCheck(sentence);
+    setGameState(GameState.Feedback);
+  };
+
+  const handleSentenceCheckComplete = useCallback((feedback: Feedback, audioBase64: string | null) => {
+      const newHistoryItem: SentenceCheckHistoryItem = {
+          id: `${Date.now()}-${Math.random()}`,
+          timestamp: Date.now(),
+          gameMode: GameMode.SentenceCheck,
+          userSentence: sentenceToCheck,
+          score: feedback.score,
+          evaluation: feedback.evaluation,
+          correctedSentence: feedback.correctedSentence,
+          feedbackExplanation: feedback.explanation,
+          audioBase64: audioBase64 ?? undefined,
+      };
+      addHistoryItem(newHistoryItem);
+      setHistory(prevHistory => [newHistoryItem, ...prevHistory]);
+  }, [sentenceToCheck]);
 
 
   const renderGameState = () => {
@@ -185,7 +217,9 @@ const App: React.FC = () => {
       case GameState.Loading:
         return <LoadingSpinner />;
       case GameState.Welcome:
-        return <WelcomeScreen onStart={handleStartPractice} onViewGrammar={handleViewGrammar} onViewHistory={handleViewHistory} />;
+        return <WelcomeScreen onStart={handleStartPractice} onViewGrammar={handleViewGrammar} onViewHistory={handleViewHistory} onStartSentenceCheck={handleStartSentenceCheck} />;
+      case GameState.SentenceCheck:
+        return <SentenceCheckScreen onCheck={handleSentenceCheckSubmit} />;
       case GameState.Practicing:
         if (gameMode === GameMode.Translation && currentTask) {
           return <PracticeScreen task={currentTask} onCheck={handleSubmission} />;
@@ -205,15 +239,26 @@ const App: React.FC = () => {
               onComplete={handleTranslationComplete}
             />;
          }
+         if (gameMode === GameMode.SentenceCheck) {
+            return <FeedbackDisplay
+              userSentence={sentenceToCheck}
+              onNext={() => { 
+                setSentenceToCheck(''); 
+                setGameState(GameState.SentenceCheck); 
+              }}
+              onComplete={handleSentenceCheckComplete}
+              onNextLabel="Check Another Sentence"
+            />;
+         }
          // Fallback for MCQ or if translation feedback is missing
          setGameState(GameState.Welcome);
-         return <WelcomeScreen onStart={handleStartPractice} onViewGrammar={handleViewGrammar} onViewHistory={handleViewHistory}/>;
+         return <WelcomeScreen onStart={handleStartPractice} onViewGrammar={handleViewGrammar} onViewHistory={handleViewHistory} onStartSentenceCheck={handleStartSentenceCheck}/>;
       case GameState.Grammar:
         return <GrammarLibrary points={grammarPoints} />;
       case GameState.History:
         return <HistoryScreen history={history} onUpdateHistoryItem={handleUpdateHistoryItem} onImportHistory={handleImportHistory} onDeleteItem={handleDeleteHistoryItem} onDeleteMultipleItems={handleDeleteMultipleHistoryItems} />;
       default:
-        return <WelcomeScreen onStart={handleStartPractice} onViewGrammar={handleViewGrammar} onViewHistory={handleViewHistory}/>;
+        return <WelcomeScreen onStart={handleStartPractice} onViewGrammar={handleViewGrammar} onViewHistory={handleViewHistory} onStartSentenceCheck={handleStartSentenceCheck}/>;
     }
   };
 

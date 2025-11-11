@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HistoryItem, GameMode, TranslationHistoryItem, MultipleChoiceHistoryItem } from '../types';
+import { HistoryItem, GameMode, TranslationHistoryItem, MultipleChoiceHistoryItem, SentenceCheckHistoryItem } from '../types';
 import { ChevronDownIcon } from './icons/ChevronDownIcon';
 import { CheckCircleIcon } from './icons/CheckCircleIcon';
 import { XCircleIcon } from './icons/XCircleIcon';
@@ -300,6 +300,132 @@ const MultipleChoiceHistoryCard: React.FC<MultipleChoiceHistoryCardProps> = ({ i
     );
 };
 
+const SentenceCheckHistoryCard: React.FC<{
+    item: SentenceCheckHistoryItem;
+    onUpdate: (item: SentenceCheckHistoryItem) => void;
+    onDelete: (id: string) => void;
+    selectionMode: boolean;
+    isSelected: boolean;
+    onToggleSelect: (id: string) => void;
+}> = ({ item, onUpdate, onDelete, selectionMode, isSelected, onToggleSelect }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [isAudioLoading, setIsAudioLoading] = useState(false);
+    const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
+
+    useEffect(() => {
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContext) {
+            const ctx = new AudioContext({ sampleRate: 24000 });
+            setAudioContext(ctx);
+            return () => { ctx.close().catch(console.error); };
+        }
+    }, []);
+
+    const handleDelete = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (window.confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
+            onDelete(item.id);
+        }
+    };
+    
+    const handleMainAction = () => {
+        if (selectionMode) {
+            onToggleSelect(item.id);
+        } else {
+            setIsOpen(prev => !prev);
+        }
+    };
+
+    const handlePlayAudio = async () => {
+        if (isAudioLoading || !audioContext) return;
+        setIsAudioLoading(true);
+
+        try {
+            let audioToPlay = item.audioBase64;
+            
+            if (!audioToPlay) {
+                const newAudioBase64 = await generateSpeech(item.correctedSentence);
+                if (newAudioBase64) {
+                    audioToPlay = newAudioBase64;
+                    onUpdate({ ...item, audioBase64: newAudioBase64 });
+                } else {
+                    throw new Error("Audio generation returned null.");
+                }
+            }
+            
+            if (audioToPlay) {
+                const audioData = decode(audioToPlay);
+                const audioBuffer = await decodeAudioData(audioData, audioContext, 24000, 1);
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                source.start();
+                source.onended = () => setIsAudioLoading(false);
+            } else {
+                 setIsAudioLoading(false);
+            }
+        } catch (error) {
+            console.error("Failed to generate or play audio from history:", error);
+            setIsAudioLoading(false);
+        }
+    };
+
+    const colorClasses = getScoreColorClasses(item.score);
+
+    return (
+        <div className={`border rounded-lg transition-all duration-200 ${isSelected ? 'border-blue-500 bg-slate-700/60' : 'border-slate-700 bg-slate-800/50'}`}>
+            <div role="button" onClick={handleMainAction} className={`w-full flex items-center p-4 text-left ${selectionMode ? 'cursor-pointer' : ''}`} aria-expanded={!selectionMode && isOpen}>
+                {selectionMode && (
+                    <div className="mr-4 flex-shrink-0">
+                         <div className={`w-6 h-6 border-2 rounded-full flex items-center justify-center ${isSelected ? 'bg-blue-500 border-blue-400' : 'border-slate-500 bg-slate-700'}`}>
+                            {isSelected && <CheckCircleIcon className="w-4 h-4 text-white" />}
+                        </div>
+                    </div>
+                )}
+                <div className="flex-1 pr-4 min-w-0">
+                    <p className="text-sm text-slate-400">{new Date(item.timestamp).toLocaleString()}</p>
+                    <p className="font-semibold text-lg text-slate-200 mt-1 truncate">{item.userSentence}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                    <div className={`w-12 h-7 flex items-center justify-center rounded-md border ${colorClasses}`}>
+                        <span className="font-bold">{item.score}</span>
+                    </div>
+                    {!selectionMode && <ChevronDownIcon className={`w-6 h-6 text-slate-400 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />}
+                </div>
+            </div>
+            {!selectionMode && isOpen && (
+                <div className="p-4 border-t border-slate-700 bg-slate-900/30 space-y-4 text-slate-300 animate-fade-in">
+                    <div>
+                        <div className="flex justify-between items-center mb-1">
+                            <strong className="text-slate-400">Corrected Sentence:</strong>
+                             <button
+                                onClick={handlePlayAudio}
+                                disabled={isAudioLoading}
+                                className="p-1.5 rounded-full text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-wait"
+                                aria-label="Play corrected sentence audio"
+                            >
+                                {isAudioLoading 
+                                    ? <div className="w-5 h-5 border-2 border-t-2 border-gray-400 border-t-white rounded-full animate-spin"></div> 
+                                    : <SpeakerWaveIcon className="w-5 h-5" />
+                                }
+                            </button>
+                        </div>
+                        <p className="p-2 bg-slate-800 rounded">{item.correctedSentence}</p>
+                    </div>
+                    <div><strong className="text-slate-400">Explanation:</strong> <div className="p-2 bg-slate-800 rounded mt-1"><MarkdownRenderer markdown={item.feedbackExplanation} /></div></div>
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-700/50">
+                        <p className="text-xs text-slate-500">Sentence Check</p>
+                        <button onClick={handleDelete} className="flex items-center gap-1 text-sm text-red-400 hover:text-red-300 transition-colors p-1 rounded-md hover:bg-red-500/10">
+                            <TrashIcon className="w-4 h-4" />
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 
 interface HistoryScreenProps {
   history: HistoryItem[];
@@ -470,6 +596,9 @@ const HistoryScreen: React.FC<HistoryScreenProps> = ({ history, onUpdateHistoryI
             };
             if (item.gameMode === GameMode.Translation) {
               return <TranslationHistoryCard item={item as TranslationHistoryItem} {...cardProps} />;
+            }
+            if (item.gameMode === GameMode.SentenceCheck) {
+              return <SentenceCheckHistoryCard item={item as SentenceCheckHistoryItem} {...cardProps} />;
             }
             return <MultipleChoiceHistoryCard item={item as MultipleChoiceHistoryItem} {...cardProps} />;
           })
